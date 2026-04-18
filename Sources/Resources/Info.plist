@@ -2,10 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- BUG-04 FIX: Hardcoded values replace unresolved Xcode build variables. SPM never
+         substitutes $(EXECUTABLE_NAME) or $(PRODUCT_BUNDLE_IDENTIFIER), so the installed
+         .app bundle contained literal dollar-sign strings instead of real values. -->
     <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
+    <string>TouchGate</string>
     <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <string>com.touchgate.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

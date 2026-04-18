@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 struct MenuBarView: View {
     @EnvironmentObject private var appState: AppState
+    // BUG-02 FIX: Read the user's default timeout so newly-added apps inherit it.
+    @AppStorage("defaultUnlockTimeout") private var defaultUnlockTimeout: Double = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,7 +42,8 @@ struct MenuBarView: View {
     private var headerIcon: String {
         switch appState.menuBarIconState {
         case .neutral:  return "shield"
-        case .locked:   return "lock.shield.fill"
+        // BUG-07 FIX: Use "lock.shield" to match StatusBarController — "lock.shield.fill" was inconsistent.
+        case .locked:   return "lock.shield"
         case .unlocked: return "lock.open.rotation"
         }
     }
@@ -158,7 +161,8 @@ struct MenuBarView: View {
         panel.begin { response in
             guard response == .OK else { return }
             for url in panel.urls {
-                if let app = BundleScanner.scan(url: url) {
+                // BUG-02 FIX: Pass defaultTimeout so the app's unlockTimeout matches user preference.
+                if let app = BundleScanner.scan(url: url, defaultTimeout: defaultUnlockTimeout) {
                     Task { await self.appState.addApp(app) }
                 }
             }

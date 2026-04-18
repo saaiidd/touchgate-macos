@@ -39,7 +39,8 @@ struct GeneralSettingsTab: View {
             if !appState.protectedApps.isEmpty {
                 Section("Per-App Overrides") {
                     ForEach(appState.protectedApps) { app in
-                        AppTimeoutRow(app: app, defaultTimeout: defaultUnlockTimeout, timeoutOptions: timeoutOptions)
+                        // BUG-02 FIX: Removed dead defaultTimeout argument — AppTimeoutRow never used it.
+                        AppTimeoutRow(app: app, timeoutOptions: timeoutOptions)
                             .environmentObject(appState)
                     }
                 }
@@ -73,7 +74,7 @@ struct GeneralSettingsTab: View {
 struct AppTimeoutRow: View {
     @EnvironmentObject private var appState: AppState
     let app: ProtectedApp
-    let defaultTimeout: Double
+    // BUG-02 FIX: Removed dead `defaultTimeout` property — it was declared but never read in body.
     let timeoutOptions: [(label: String, seconds: Double)]
 
     var body: some View {

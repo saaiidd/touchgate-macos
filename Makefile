@@ -1,13 +1,13 @@
 .PHONY: build run install uninstall clean help
 
 INSTALL_PATH = $(HOME)/Applications/TouchGate.app
-BUILD_PATH = .build/debug/TouchGate
+BUILD_PATH = .build/release/TouchGate
 
 help:
 	@echo "TouchGate — macOS menu bar app that gates app launches behind Touch ID"
 	@echo ""
 	@echo "Available commands:"
-	@echo "  make build      Build the app (binary goes to .build/debug/TouchGate)"
+	@echo "  make build      Build the app (binary goes to .build/release/TouchGate)"
 	@echo "  make run        Build and run in background (adds to menu bar)"
 	@echo "  make install    Build and install to ~/Applications/TouchGate.app"
 	@echo "  make uninstall  Remove ~/Applications/TouchGate.app"

@@ -12,10 +12,13 @@ actor UnlockLogger {
     private static let maxEntries = 1000
 
     init() {
+        // BUG-03 FIX: Replace force-unwrap with a safe fallback. FileManager.urls() returns an
+        // empty array only on deeply broken sandboxed environments — but a crash here would prevent
+        // TouchGate from launching at all, so we provide a reasonable fallback.
         let supportDir = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first!
+        ).first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         let appDir = supportDir.appendingPathComponent("TouchGate")
         // createDirectory is idempotent with withIntermediateDirectories: true.
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
