@@ -1,0 +1,41 @@
+# Build artifacts
+.build/
+.swiftpm/
+*.o
+*.swiftmodule
+*.swiftsourceinfo
+
+# Xcode
+*.pbxproj
+*.xcodeproj/
+*.xcworkspace/
+*.xcconfig
+xcuserdata/
+*.playground
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*~.nib
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swiftpm
+
+# Dependencies
+Packages/
+
+# Logs
+*.log
+
+# Application files
+TouchGate.app
+~/Applications/TouchGate.app
+
+# Keychain test files
+*.keychain
+*.keychain-db

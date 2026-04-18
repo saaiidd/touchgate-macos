@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Sandbox is DISABLED.
+        Required for:
+          - NSRunningApplication.terminate() / forceTerminate() on other user processes
+          - NSWorkspace.didLaunchApplicationNotification monitoring without sandboxed restrictions
+          - NSOpenPanel access to /Applications without entitlement limitations
+          - Writing log files to ~/Library/Application Support/TouchGate/
+
+        NOTE: This means TouchGate cannot be distributed via the Mac App Store.
+        It targets direct distribution only.
+    -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!--
+        Hardened Runtime is enabled in Xcode project settings (Signing & Capabilities tab).
+        LocalAuthentication / Touch ID works with Hardened Runtime ON and no additional
+        entitlement beyond having the runtime enabled.
+
+        No com.apple.security.device.biometric or similar key is needed for LAContext.
+    -->
+</dict>
+</plist>

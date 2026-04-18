@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>TouchGate</string>
+    <key>CFBundleDisplayName</key>
+    <string>TouchGate</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <!-- Minimum macOS version: Ventura (13.0) for SMAppService, Table view, async LA -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <!-- Run as a background agent — no Dock icon, no app switcher entry -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Required to call AXIsProcessTrusted() and use Accessibility APIs -->
+    <key>NSAccessibilityUsageDescription</key>
+    <string>TouchGate uses Accessibility to reliably terminate protected applications when Touch ID authentication is required. Without this permission, basic launch detection still works, but termination of some apps may be less reliable.</string>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Suppresses "NSWindow drag regions" console warnings in debug builds -->
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+</dict>
+</plist>
