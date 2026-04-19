@@ -30,8 +30,10 @@ let package = Package(
                 "Settings/GeneralSettingsTab.swift",
                 "Settings/PermissionsView.swift",
                 "Settings/LogView.swift",
+                "Settings/GatesSettingsTab.swift",
                 "Utilities/BundleScanner.swift",
-                "Utilities/UnlockLogger.swift"
+                "Utilities/UnlockLogger.swift",
+                "Utilities/ActiveTimeTracker.swift"
             ],
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])

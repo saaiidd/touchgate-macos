@@ -1,5 +1,20 @@
 import Foundation
 
+// MARK: - Gate Rule
+
+/// A prerequisite gate: the protected app cannot be unlocked until `requiredBundleId`
+/// has been frontmost for at least `requiredMinutes` today.
+struct GateRule: Codable, Sendable, Equatable {
+    /// Bundle ID of the app that must be active (e.g. "com.apple.dt.Xcode").
+    let requiredBundleId: String
+    /// Human-readable name for display in the UI and blocked panel.
+    let requiredDisplayName: String
+    /// Minutes of foreground time required today before this app unlocks.
+    let requiredMinutes: Int
+}
+
+// MARK: - Protected App
+
 // Codable model persisted to Keychain as JSON. Schema is intentionally stable.
 //
 // FIELD NOTES:
@@ -17,6 +32,9 @@ struct ProtectedApp: Codable, Identifiable, Sendable {
     let iconData: Data?
     var unlockTimeout: TimeInterval   // Legacy; retained for schema + future per-app override
     var lastUnlocked: Date?
+    /// Optional prerequisite gate. nil = no gate. Swift synthesises decodeIfPresent for
+    /// Optional properties, so old Keychain entries without this key round-trip without error.
+    var gateRule: GateRule?
 
     init(
         id: UUID = UUID(),
@@ -24,7 +42,8 @@ struct ProtectedApp: Codable, Identifiable, Sendable {
         displayName: String,
         bundlePath: String,
         iconData: Data?,
-        unlockTimeout: TimeInterval = 0
+        unlockTimeout: TimeInterval = 0,
+        gateRule: GateRule? = nil
     ) {
         self.id = id
         self.bundleIdentifier = bundleIdentifier
@@ -33,5 +52,6 @@ struct ProtectedApp: Codable, Identifiable, Sendable {
         self.iconData = iconData
         self.unlockTimeout = unlockTimeout
         self.lastUnlocked = nil
+        self.gateRule = gateRule
     }
 }

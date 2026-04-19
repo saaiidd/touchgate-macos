@@ -5,7 +5,7 @@ actor InterceptionHandler {
 
     enum InterceptionResult {
         case unlocked
-        case cancelled      // User dismissed auth
+        case cancelled      // User dismissed auth or gate was not met
         case failed         // Auth rejected or error
         case alreadyPending // Second launch while first auth is in progress
     }
@@ -13,23 +13,21 @@ actor InterceptionHandler {
     private var pendingAuthentications: Set<String> = []
     private let authManager: AuthenticationManager
     private let logger: UnlockLogger
+    private let activeTracker: ActiveTimeTracker
 
-    /// Weak reference to the currently-visible intent prompt, so tearDown() can cancel it.
+    /// Weak reference to the currently-visible intent or gate panel, so tearDown() can cancel it.
     private weak var activePromptWindow: IntentPromptWindow?
 
-    init(authManager: AuthenticationManager, logger: UnlockLogger) {
+    init(authManager: AuthenticationManager, logger: UnlockLogger, activeTracker: ActiveTimeTracker) {
         self.authManager = authManager
         self.logger = logger
+        self.activeTracker = activeTracker
     }
 
     /// Cancel any in-flight intent prompt and resolve its continuation cleanly.
-    /// Called from applicationWillTerminate so the process can exit without leaving a dangling
-    /// continuation or showing a zombie window.
     func tearDown() {
         let panel = activePromptWindow
-        Task { @MainActor in
-            panel?.viewModel.cancel()
-        }
+        Task { @MainActor in panel?.viewModel.cancel() }
     }
 
     func intercept(
@@ -38,8 +36,6 @@ actor InterceptionHandler {
     ) async -> InterceptionResult {
         let bundleId = protectedApp.bundleIdentifier
 
-        // Second launch of the same protected app while auth is pending — kill it silently
-        // so the user only sees one prompt.
         if pendingAuthentications.contains(bundleId) {
             runningApp.forceTerminate()
             return .alreadyPending
@@ -49,34 +45,47 @@ actor InterceptionHandler {
         defer { pendingAuthentications.remove(bundleId) }
 
         // SECURITY: Terminate immediately before the app fully initialises.
-        // LIMITATION: The app will briefly appear on screen — unavoidable at user-space level.
         _ = runningApp.terminate()
-
-        // Give the app 500 ms to exit gracefully, then force-kill.
         try? await Task.sleep(nanoseconds: 500_000_000)
-        if !runningApp.isTerminated {
-            runningApp.forceTerminate()
-        }
-
-        // Extra 300 ms to ensure the process is fully gone before we relaunch.
+        if !runningApp.isTerminated { runningApp.forceTerminate() }
         try? await Task.sleep(nanoseconds: 300_000_000)
 
-        // Bring TouchGate forward so the intent panel (and later the auth sheet) appear on top.
-        await MainActor.run {
-            NSApp.activate(ignoringOtherApps: true)
+        // Bring TouchGate forward so our panels appear above other windows.
+        await MainActor.run { NSApp.activate(ignoringOtherApps: true) }
+
+        // ── Prerequisite Gate ──────────────────────────────────────────────────────────────────
+        // Check the gate rule BEFORE showing the intent prompt. If the gate is not met, inform
+        // the user and bail. They must earn the required time first.
+        if let gate = protectedApp.gateRule {
+            let todaySeconds = await activeTracker.activeSeconds(for: gate.requiredBundleId)
+            let requiredSeconds = TimeInterval(gate.requiredMinutes * 60)
+
+            if todaySeconds < requiredSeconds {
+                let doneMinutes = Int(todaySeconds / 60)
+                let blockedPanel = await MainActor.run {
+                    let icon = protectedApp.iconData.flatMap { NSImage(data: $0) }
+                    return GateBlockedWindow(
+                        blockedAppName: protectedApp.displayName,
+                        requiredAppName: gate.requiredDisplayName,
+                        requiredMinutes: gate.requiredMinutes,
+                        doneMinutes: doneMinutes,
+                        blockedAppIcon: icon
+                    )
+                }
+                await blockedPanel.showAndWait()
+                let logReason = "gate:\(gate.requiredDisplayName)·\(doneMinutes)/\(gate.requiredMinutes)min"
+                await logger.log(appName: protectedApp.displayName, success: false, reason: logReason)
+                return .cancelled
+            }
         }
+        // ──────────────────────────────────────────────────────────────────────────────────────
 
         // ── Intent Journaling ─────────────────────────────────────────────────────────────────
-        // Show a 3-second "Why are you opening this?" panel before Touch ID fires.
-        // nil return  → "Don't Open": skip authentication entirely.
-        // ""  return  → timer elapsed or user skipped: proceed to Touch ID with empty reason.
-        // non-empty   → user typed an intent: proceed to Touch ID and log the reason.
         let intentReason: String? = await {
             let panel = await MainActor.run {
                 let icon = protectedApp.iconData.flatMap { NSImage(data: $0) }
                 return IntentPromptWindow(appName: protectedApp.displayName, appIcon: icon)
             }
-            // Store weak ref for tearDown().
             self.activePromptWindow = panel
             let result = await panel.promptAndWait()
             self.activePromptWindow = nil
@@ -84,11 +93,10 @@ actor InterceptionHandler {
         }()
 
         guard let reason = intentReason else {
-            // User chose "Don't Open" — record the refusal and bail.
             await logger.log(appName: protectedApp.displayName, success: false, reason: nil)
             return .cancelled
         }
-        // ─────────────────────────────────────────────────────────────────────────────────────
+        // ──────────────────────────────────────────────────────────────────────────────────────
 
         do {
             let success = try await authManager.authenticate(
@@ -99,10 +107,8 @@ actor InterceptionHandler {
         } catch let error as AuthenticationManager.AuthError {
             await logger.log(appName: protectedApp.displayName, success: false, reason: reason)
             switch error {
-            case .userCancelled, .systemCancelled:
-                return .cancelled
-            default:
-                return .failed
+            case .userCancelled, .systemCancelled: return .cancelled
+            default: return .failed
             }
         } catch {
             await logger.log(appName: protectedApp.displayName, success: false, reason: reason)

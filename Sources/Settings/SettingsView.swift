@@ -16,8 +16,12 @@ struct SettingsView: View {
             LogView()
                 .environmentObject(appState)
                 .tabItem { Label("Log", systemImage: "list.bullet.clipboard") }
+
+            GatesSettingsTab()
+                .environmentObject(appState)
+                .tabItem { Label("Gates", systemImage: "arrow.triangle.branch") }
         }
-        .frame(width: 560, height: 540)
+        .frame(width: 580, height: 560)
         .padding(20)
     }
 }

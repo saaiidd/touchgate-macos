@@ -26,6 +26,7 @@ final class AppState: ObservableObject {
     let authManager: AuthenticationManager
     private let store: ProtectedAppStore
     let interceptionHandler: InterceptionHandler
+    let activeTimeTracker: ActiveTimeTracker
     private var appMonitor: AppMonitor?
 
     private static let log = Logger(subsystem: "com.touchgate.app", category: "AppState")
@@ -40,11 +41,17 @@ final class AppState: ObservableObject {
         let logger = UnlockLogger()
         let authManager = AuthenticationManager()
         let store = ProtectedAppStore()
+        let activeTimeTracker = ActiveTimeTracker()
 
         self.logger = logger
         self.authManager = authManager
         self.store = store
-        self.interceptionHandler = InterceptionHandler(authManager: authManager, logger: logger)
+        self.activeTimeTracker = activeTimeTracker
+        self.interceptionHandler = InterceptionHandler(
+            authManager: authManager,
+            logger: logger,
+            activeTracker: activeTimeTracker
+        )
 
         // Load persisted mode + timeout from UserDefaults with sensible defaults.
         let defaults = UserDefaults.standard
@@ -104,12 +111,14 @@ final class AppState: ObservableObject {
     }
 
     func startMonitoring() {
+        Task { await activeTimeTracker.start() }
         appMonitor = AppMonitor(appState: self, interceptionHandler: interceptionHandler)
         appMonitor?.start()
     }
 
     func stopMonitoring() {
         appMonitor?.stop()
+        Task { await activeTimeTracker.stop() }
     }
 
     // MARK: - App Management
@@ -232,6 +241,20 @@ final class AppState: ObservableObject {
 
     func protectedApp(for bundleIdentifier: String) -> ProtectedApp? {
         protectedApps.first { $0.bundleIdentifier == bundleIdentifier }
+    }
+
+    // MARK: - Gate Rules
+
+    func setGateRule(_ rule: GateRule?, for id: UUID) async {
+        guard let index = protectedApps.firstIndex(where: { $0.id == id }) else { return }
+        protectedApps[index].gateRule = rule
+        await persistApps()
+    }
+
+    /// Minutes `bundleId` was frontmost today (includes the running session if currently active).
+    func activeMinutesToday(for bundleId: String) async -> Int {
+        let seconds = await activeTimeTracker.activeSeconds(for: bundleId)
+        return Int(seconds / 60)
     }
 
     // MARK: - Permissions

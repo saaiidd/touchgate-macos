@@ -249,3 +249,164 @@ final class IntentPromptWindow: NSPanel, NSWindowDelegate, @unchecked Sendable {
         }
     }
 }
+
+// MARK: - Gate Blocked ViewModel
+
+/// Drives the gate-blocked panel. Resolves `Void` — the user only needs to dismiss it.
+@MainActor
+final class GateBlockedViewModel: ObservableObject {
+    var continuation: CheckedContinuation<Void, Never>?
+
+    func dismiss() {
+        let c = continuation
+        continuation = nil
+        c?.resume()
+    }
+}
+
+// MARK: - Gate Blocked View
+
+struct GateBlockedView: View {
+    @ObservedObject var viewModel: GateBlockedViewModel
+    let blockedAppName: String
+    let requiredAppName: String
+    let requiredMinutes: Int
+    let doneMinutes: Int
+    let blockedAppIcon: NSImage?
+
+    private var progress: Double {
+        guard requiredMinutes > 0 else { return 1 }
+        return min(1, Double(doneMinutes) / Double(requiredMinutes))
+    }
+
+    private var remaining: Int { max(0, requiredMinutes - doneMinutes) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+
+            // Header
+            HStack(spacing: 12) {
+                Group {
+                    if let icon = blockedAppIcon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.secondary.opacity(0.2))
+                            .frame(width: 48, height: 48)
+                    }
+                }
+                .opacity(0.55)  // dimmed — app is locked
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(blockedAppName) is locked")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Finish your prerequisite first")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Progress
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(requiredAppName)
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Text("\(doneMinutes) / \(requiredMinutes) min")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(remaining == 0 ? .green : .secondary)
+                }
+                ProgressView(value: progress)
+                    .tint(remaining == 0 ? .green : .accentColor)
+                Text(footerMessage)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            // Dismiss
+            HStack {
+                Spacer()
+                Button("Got It") { viewModel.dismiss() }
+                    .keyboardShortcut(.return, modifiers: [])
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+    }
+
+    private var footerMessage: String {
+        switch remaining {
+        case 0:  return "Requirement met — try opening \(blockedAppName) again."
+        case 1:  return "1 more minute of \(requiredAppName) needed today."
+        default: return "\(remaining) more minutes of \(requiredAppName) needed today."
+        }
+    }
+}
+
+// MARK: - Gate Blocked Window
+
+/// Floating panel that tells the user their prerequisite gate isn't met yet.
+/// Suspends the caller until the user dismisses it.
+final class GateBlockedWindow: NSPanel, NSWindowDelegate, @unchecked Sendable {
+
+    let viewModel: GateBlockedViewModel
+
+    init(
+        blockedAppName: String,
+        requiredAppName: String,
+        requiredMinutes: Int,
+        doneMinutes: Int,
+        blockedAppIcon: NSImage?
+    ) {
+        viewModel = GateBlockedViewModel()
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 180),
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        titlebarAppearsTransparent = true
+        isMovableByWindowBackground = true
+        isReleasedWhenClosed = false
+        level = .modalPanel
+        collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        hidesOnDeactivate = false
+
+        let host = NSHostingController(
+            rootView: GateBlockedView(
+                viewModel: viewModel,
+                blockedAppName: blockedAppName,
+                requiredAppName: requiredAppName,
+                requiredMinutes: requiredMinutes,
+                doneMinutes: doneMinutes,
+                blockedAppIcon: blockedAppIcon
+            )
+        )
+        let sz = host.sizeThatFits(in: CGSize(width: 380, height: 10_000))
+        setContentSize(sz)
+        contentViewController = host
+        delegate = self
+        center()
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    @MainActor
+    func showAndWait() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            viewModel.continuation = c
+            makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if viewModel.continuation != nil { viewModel.dismiss() }
+    }
+}
