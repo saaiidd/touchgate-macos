@@ -120,7 +120,7 @@ struct MenuBarView: View {
             Divider()
 
             menuButton("Settings…", icon: "gear") {
-                openSettings()
+                showSettings()
             }
 
             menuButton("Quit TouchGate", icon: "power", role: .destructive) {
@@ -169,15 +169,13 @@ struct MenuBarView: View {
         }
     }
 
-    private func openSettings() {
-        // The popover is the key window while it's open. Sending showSettingsWindow: while the
-        // popover holds key status causes the settings window to appear hidden behind it, or not
-        // at all. Fix: close the key window (the popover) first, then open settings after one
-        // run-loop pass so the popover fully dismisses before the new window is presented.
-        NSApp.keyWindow?.close()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
+    private func showSettings() {
+        // ORDERING IS CRITICAL: activate must come before sendAction so the app is key
+        // when the action traverses the responder chain. The original code had them reversed.
+        //
+        // The popover uses .transient behavior, so it auto-closes the moment the settings
+        // window becomes key — no need to manually dismiss it here.
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
