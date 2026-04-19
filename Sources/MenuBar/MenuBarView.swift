@@ -170,9 +170,14 @@ struct MenuBarView: View {
     }
 
     private func openSettings() {
-        // showSettingsWindow: was introduced in macOS 13 (renaming showPreferencesWindow:).
-        // Our deployment floor is 13.0, so no availability check is needed.
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // The popover is the key window while it's open. Sending showSettingsWindow: while the
+        // popover holds key status causes the settings window to appear hidden behind it, or not
+        // at all. Fix: close the key window (the popover) first, then open settings after one
+        // run-loop pass so the popover fully dismisses before the new window is presented.
+        NSApp.keyWindow?.close()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
