@@ -5,6 +5,35 @@ struct LogEntry: Codable, Identifiable {
     let timestamp: Date
     let appName: String
     let success: Bool
+    // nil  = entry was recorded before Intent Journaling existed (legacy)
+    // ""   = prompt was shown but timer elapsed / user skipped
+    // text = user typed a reason
+    let reason: String?
+
+    // Custom decoder: treat missing `reason` key as nil so old JSON files
+    // (which predate this field) round-trip without throwing.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id        = try c.decode(UUID.self,   forKey: .id)
+        timestamp = try c.decode(Date.self,   forKey: .timestamp)
+        appName   = try c.decode(String.self, forKey: .appName)
+        success   = try c.decode(Bool.self,   forKey: .success)
+        reason    = try c.decodeIfPresent(String.self, forKey: .reason)
+    }
+
+    init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        appName: String,
+        success: Bool,
+        reason: String?
+    ) {
+        self.id        = id
+        self.timestamp = timestamp
+        self.appName   = appName
+        self.success   = success
+        self.reason    = reason
+    }
 }
 
 actor UnlockLogger {
@@ -25,9 +54,16 @@ actor UnlockLogger {
         fileURL = appDir.appendingPathComponent("unlock_log.json")
     }
 
-    func log(appName: String, success: Bool) {
+    // reason: String? = nil default keeps all pre-journaling call sites compiling unchanged.
+    func log(appName: String, success: Bool, reason: String? = nil) {
         var entries = (try? load()) ?? []
-        entries.append(LogEntry(id: UUID(), timestamp: Date(), appName: appName, success: success))
+        entries.append(LogEntry(
+            id: UUID(),
+            timestamp: Date(),
+            appName: appName,
+            success: success,
+            reason: reason
+        ))
 
         // Cap log size so the file never grows unbounded.
         if entries.count > Self.maxEntries {

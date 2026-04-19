@@ -19,5 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         appState.stopMonitoring()
+        // Cancel any in-flight intent prompt so its continuation is resolved before the process exits.
+        Task { await appState.interceptionHandler.tearDown() }
     }
 }

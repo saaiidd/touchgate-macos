@@ -17,7 +17,7 @@ struct SettingsView: View {
                 .environmentObject(appState)
                 .tabItem { Label("Log", systemImage: "list.bullet.clipboard") }
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 560, height: 540)
         .padding(20)
     }
 }

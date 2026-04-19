@@ -23,6 +23,7 @@ let package = Package(
                 "Protection/AppMonitor.swift",
                 "Protection/AuthenticationManager.swift",
                 "Protection/InterceptionHandler.swift",
+                "Protection/IntentPromptWindow.swift",
                 "Storage/ProtectedApp.swift",
                 "Storage/ProtectedAppStore.swift",
                 "Settings/SettingsView.swift",

@@ -14,9 +14,22 @@ actor InterceptionHandler {
     private let authManager: AuthenticationManager
     private let logger: UnlockLogger
 
+    /// Weak reference to the currently-visible intent prompt, so tearDown() can cancel it.
+    private weak var activePromptWindow: IntentPromptWindow?
+
     init(authManager: AuthenticationManager, logger: UnlockLogger) {
         self.authManager = authManager
         self.logger = logger
+    }
+
+    /// Cancel any in-flight intent prompt and resolve its continuation cleanly.
+    /// Called from applicationWillTerminate so the process can exit without leaving a dangling
+    /// continuation or showing a zombie window.
+    func tearDown() {
+        let panel = activePromptWindow
+        Task { @MainActor in
+            panel?.viewModel.cancel()
+        }
     }
 
     func intercept(
@@ -48,19 +61,43 @@ actor InterceptionHandler {
         // Extra 300 ms to ensure the process is fully gone before we relaunch.
         try? await Task.sleep(nanoseconds: 300_000_000)
 
-        // Bring TouchGate forward so the system auth sheet appears above other windows.
+        // Bring TouchGate forward so the intent panel (and later the auth sheet) appear on top.
         await MainActor.run {
             NSApp.activate(ignoringOtherApps: true)
         }
+
+        // ── Intent Journaling ─────────────────────────────────────────────────────────────────
+        // Show a 3-second "Why are you opening this?" panel before Touch ID fires.
+        // nil return  → "Don't Open": skip authentication entirely.
+        // ""  return  → timer elapsed or user skipped: proceed to Touch ID with empty reason.
+        // non-empty   → user typed an intent: proceed to Touch ID and log the reason.
+        let intentReason: String? = await {
+            let panel = await MainActor.run {
+                let icon = protectedApp.iconData.flatMap { NSImage(data: $0) }
+                return IntentPromptWindow(appName: protectedApp.displayName, appIcon: icon)
+            }
+            // Store weak ref for tearDown().
+            self.activePromptWindow = panel
+            let result = await panel.promptAndWait()
+            self.activePromptWindow = nil
+            return result
+        }()
+
+        guard let reason = intentReason else {
+            // User chose "Don't Open" — record the refusal and bail.
+            await logger.log(appName: protectedApp.displayName, success: false, reason: nil)
+            return .cancelled
+        }
+        // ─────────────────────────────────────────────────────────────────────────────────────
 
         do {
             let success = try await authManager.authenticate(
                 reason: "Authenticate to open \(protectedApp.displayName)"
             )
-            await logger.log(appName: protectedApp.displayName, success: success)
+            await logger.log(appName: protectedApp.displayName, success: success, reason: reason)
             return success ? .unlocked : .failed
         } catch let error as AuthenticationManager.AuthError {
-            await logger.log(appName: protectedApp.displayName, success: false)
+            await logger.log(appName: protectedApp.displayName, success: false, reason: reason)
             switch error {
             case .userCancelled, .systemCancelled:
                 return .cancelled
@@ -68,7 +105,7 @@ actor InterceptionHandler {
                 return .failed
             }
         } catch {
-            await logger.log(appName: protectedApp.displayName, success: false)
+            await logger.log(appName: protectedApp.displayName, success: false, reason: reason)
             return .failed
         }
     }
