@@ -170,12 +170,14 @@ struct MenuBarView: View {
     }
 
     private func showSettings() {
-        // ORDERING IS CRITICAL: activate must come before sendAction so the app is key
-        // when the action traverses the responder chain. The original code had them reversed.
+        // DO NOT call NSApp.activate or sendAction here.
+        // This view lives inside an NSPopover. Any call to NSApp.activate from within
+        // the popover triggers .transient dismissal immediately — the popover is gone
+        // before sendAction reaches any responder, so the action is silently dropped.
         //
-        // The popover uses .transient behavior, so it auto-closes the moment the settings
-        // window becomes key — no need to manually dismiss it here.
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // Instead, post a notification. StatusBarController observes it, closes the
+        // popover on its own terms, then fires showSettingsWindow: once the window
+        // hierarchy is clean.
+        NotificationCenter.default.post(name: .touchGateOpenSettings, object: nil)
     }
 }

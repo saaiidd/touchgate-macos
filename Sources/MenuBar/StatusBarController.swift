@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 import Combine
 
+extension Notification.Name {
+    /// Posted by MenuBarView when the user taps "Settings…".
+    /// StatusBarController observes this and handles the full open-settings sequence.
+    static let touchGateOpenSettings = Notification.Name("com.touchgate.openSettings")
+}
+
 // NSObject inheritance is required for the @objc selector used by NSStatusBarButton target/action.
 @MainActor
 final class StatusBarController: NSObject {
@@ -16,6 +22,7 @@ final class StatusBarController: NSObject {
         setupStatusItem()
         setupPopover()
         observeIconState()
+        observeOpenSettingsRequest()
     }
 
     private func setupStatusItem() {
@@ -60,6 +67,31 @@ final class StatusBarController: NSObject {
                 self.updateButtonImage(state: self.appState.menuBarIconState)
             }
             .store(in: &cancellables)
+    }
+
+    // Observe the notification posted by MenuBarView when "Settings…" is tapped.
+    // We handle it here because only StatusBarController has a reference to the popover —
+    // it must close the popover BEFORE firing showSettingsWindow:, otherwise the transient
+    // popover dismisses mid-flight and the action finds no key window to traverse.
+    private func observeOpenSettingsRequest() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenSettings),
+            name: .touchGateOpenSettings,
+            object: nil
+        )
+    }
+
+    @objc private func handleOpenSettings() {
+        // 1. Close the popover cleanly.
+        popover?.performClose(nil)
+        // 2. Wait one run-loop pass for the popover to finish dismissing,
+        //    then make the app key and show the settings window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            _ = self  // retain self until block fires
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
     }
 
     @objc private func togglePopover(_ sender: NSStatusBarButton) {
