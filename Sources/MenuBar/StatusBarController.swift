@@ -41,20 +41,23 @@ final class StatusBarController: NSObject {
     }
 
     private func observeIconState() {
-        // $protectedApps fires with the NEW array already set, so computing icon state here is safe.
-        appState.$protectedApps
+        // Re-evaluate on any change that can affect the icon: protected list, mode, timeout.
+        // We merge three Publishers into a single trigger and then recompute via
+        // appState.menuBarIconState — the canonical, mode-aware computation.
+        //
+        // NOTE: Relaxed-mode sleep/wake clearing does NOT flow through Combine (the session
+        // set is not @Published). The icon will reconcile on the next launch notification
+        // or mode change. Accepted gap — the popover UI reflects ground truth on open.
+        let appsChanges = appState.$protectedApps.map { _ in () }
+        let modeChanges = appState.$securityMode.map { _ in () }
+        let timeoutChanges = appState.$balancedModeTimeout.map { _ in () }
+
+        appsChanges
+            .merge(with: modeChanges, timeoutChanges)
             .receive(on: RunLoop.main)
-            .sink { [weak self] apps in
+            .sink { [weak self] _ in
                 guard let self else { return }
-                let state: AppState.MenuBarIconState
-                if apps.isEmpty {
-                    state = .neutral
-                } else if apps.contains(where: { $0.isCurrentlyUnlocked }) {
-                    state = .unlocked
-                } else {
-                    state = .locked
-                }
-                self.updateButtonImage(state: state)
+                self.updateButtonImage(state: self.appState.menuBarIconState)
             }
             .store(in: &cancellables)
     }

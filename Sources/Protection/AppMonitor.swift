@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 // Observes NSWorkspace for app launches and routes protected ones through InterceptionHandler.
 // LIMITATION: NSWorkspace notifications fire after the app has already launched.
@@ -10,8 +11,12 @@ final class AppMonitor {
     private weak var appState: AppState?
     private let interceptionHandler: InterceptionHandler
 
+    private static let log = Logger(subsystem: "com.touchgate.app", category: "AppMonitor")
+
     // The token returned by the closure-based observer; kept alive for the observer's lifetime.
     private var observerToken: Any?
+    // Second observer: system wake notification, used to reset Relaxed mode session state.
+    private var wakeObserverToken: Any?
 
     // Debounce map: prevents hammering auth prompts if an app crashes and relaunches rapidly.
     // Keyed by bundle identifier; value is the last interception timestamp.
@@ -37,6 +42,10 @@ final class AppMonitor {
     }
 
     func start() {
+        let trusted = AXIsProcessTrusted()
+        let appCount = self.appState?.protectedApps.count ?? -1
+        Self.log.info("AppMonitor starting. Accessibility trusted: \(trusted, privacy: .public). Protected apps: \(appCount, privacy: .public)")
+
         // Closure-based API does not require NSObject inheritance, unlike addObserver(_:selector:...).
         observerToken = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification,
@@ -49,12 +58,31 @@ final class AppMonitor {
                 self?.appDidLaunch(notification)
             }
         }
+
+        // System wake resets the Relaxed mode session set. No-op for Balanced/Strict
+        // (they don't consult sessionUnlockedApps). Registered on the workspace
+        // notification center, same thread as launch notifications.
+        wakeObserverToken = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.appState?.clearSessionUnlocks()
+            }
+        }
+
+        Self.log.info("AppMonitor observer registered.")
     }
 
     func stop() {
         if let token = observerToken {
             NSWorkspace.shared.notificationCenter.removeObserver(token)
             observerToken = nil
+        }
+        if let token = wakeObserverToken {
+            NSWorkspace.shared.notificationCenter.removeObserver(token)
+            wakeObserverToken = nil
         }
     }
 
@@ -66,17 +94,27 @@ final class AppMonitor {
             let appState
         else { return }
 
+        Self.log.info("Launch detected: \(bundleId, privacy: .public)")
+
         guard appState.isProtected(bundleIdentifier: bundleId) else { return }
+
+        Self.log.info("Protected app intercepted: \(bundleId, privacy: .public)")
 
         // Allow the one post-auth relaunch through — this handles the unlockTimeout == 0 case
         // where isCurrentlyUnlocked would incorrectly return false right after authentication.
         if justAuthenticated.contains(bundleId) {
             justAuthenticated.remove(bundleId)
+            Self.log.info("Post-auth relaunch — allowing through: \(bundleId, privacy: .public)")
             return
         }
 
-        // Allow if within a non-zero grace period (timeout > 0 and not yet expired).
-        guard !appState.isUnlocked(bundleIdentifier: bundleId) else { return }
+        // Central authentication decision. The ONLY place that decides if a launch needs
+        // auth — all mode-specific logic (Relaxed session, Balanced timeout, Strict) lives
+        // inside AppState.requiresAuthentication(for:).
+        let needsAuth = appState.requiresAuthentication(for: bundleId)
+        let modeStr = String(describing: appState.securityMode)
+        Self.log.info("requiresAuthentication=\(needsAuth, privacy: .public) mode=\(modeStr, privacy: .public) bundleId=\(bundleId, privacy: .public)")
+        guard needsAuth else { return }
 
         // Debounce — if we intercepted this app very recently, don't pile on another auth prompt.
         let now = Date()
@@ -89,6 +127,8 @@ final class AppMonitor {
         lastInterceptionTime[bundleId] = now
 
         guard let protectedApp = appState.protectedApp(for: bundleId) else { return }
+
+        Self.log.info("Dispatching interception for: \(bundleId, privacy: .public)")
 
         // Capture the bundle URL before termination so we can relaunch later.
         let bundleURL = URL(fileURLWithPath: protectedApp.bundlePath)
@@ -105,12 +145,17 @@ final class AppMonitor {
             case .unlocked:
                 // Mark this bundle ID as just-authenticated BEFORE calling open(), so the
                 // incoming didLaunchApplicationNotification is allowed through unconditionally.
+                Self.log.info("Auth succeeded for \(bundleId, privacy: .public) — relaunching")
                 self.justAuthenticated.insert(bundleId)
                 await appState.recordUnlock(bundleIdentifier: bundleId)
                 NSWorkspace.shared.open(bundleURL)
 
-            case .cancelled, .failed, .alreadyPending:
-                break
+            case .cancelled:
+                Self.log.info("Auth cancelled for \(bundleId, privacy: .public)")
+            case .failed:
+                Self.log.info("Auth failed for \(bundleId, privacy: .public)")
+            case .alreadyPending:
+                Self.log.info("Auth already pending for \(bundleId, privacy: .public)")
             }
         }
     }

@@ -16,6 +16,7 @@ let package = Package(
                 "App/TouchGateApp.swift",
                 "App/AppDelegate.swift",
                 "App/AppState.swift",
+                "App/SecurityMode.swift",
                 "MenuBar/StatusBarController.swift",
                 "MenuBar/MenuBarView.swift",
                 "MenuBar/AppRowView.swift",

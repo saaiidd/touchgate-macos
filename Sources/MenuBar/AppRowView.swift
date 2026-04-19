@@ -50,14 +50,20 @@ struct AppRowView: View {
         }
     }
 
+    // Mode-aware status label. Reads from AppState rather than the (legacy) per-app
+    // unlockTimeout field — that field is retained in storage for a future per-app
+    // override feature but is not consulted by the current auth decision.
     private var statusLabel: String {
-        if app.isCurrentlyUnlocked {
-            return "Unlocked (grace period active)"
-        } else if app.unlockTimeout == 0 {
+        let locked = appState.requiresAuthentication(for: app.bundleIdentifier)
+        switch appState.securityMode {
+        case .strict:
             return "Always requires Touch ID"
-        } else {
-            let minutes = Int(app.unlockTimeout / 60)
-            return "Locked · \(minutes)m grace period"
+        case .relaxed:
+            return locked ? "Locked until Touch ID" : "Unlocked this session"
+        case .balanced:
+            return locked
+                ? "Locked · \(appState.balancedModeTimeout)m inactivity window"
+                : "Unlocked · \(appState.balancedModeTimeout)m window"
         }
     }
 }

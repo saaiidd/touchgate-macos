@@ -2,48 +2,49 @@ import SwiftUI
 import AppKit
 import ServiceManagement
 
+// General settings: Security Mode (the whole auth policy) + Launch at login.
+//
+// DESIGN NOTE: Per-app timeout overrides were intentionally removed in favor of a single
+// global mode. The underlying ProtectedApp.unlockTimeout field is retained so a future
+// release can re-expose per-app overrides via a `usesGlobalMode: Bool` flag on ProtectedApp
+// without any Keychain migration.
 struct GeneralSettingsTab: View {
     @EnvironmentObject private var appState: AppState
-    @AppStorage("defaultUnlockTimeout") private var defaultUnlockTimeout: Double = 0
     @State private var launchAtLoginEnabled: Bool = false
 
-    private let timeoutOptions: [(label: String, seconds: Double)] = [
-        ("Always require Touch ID", 0),
-        ("5 minutes", 300),
-        ("15 minutes", 900),
-        ("30 minutes", 1800),
-        ("1 hour", 3600)
-    ]
+    // Inactivity timeout options for Balanced mode, in minutes.
+    private let balancedTimeoutOptions: [Int] = [1, 5, 10, 15, 30, 60]
 
     var body: some View {
         Form {
+            Section("Security Mode") {
+                Picker("Mode", selection: modeBinding) {
+                    ForEach(SecurityMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                // Always-visible explanation. Users must never be surprised by re-lock behavior.
+                Text(appState.securityMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if appState.securityMode == .balanced {
+                    Picker("Re-lock after", selection: timeoutBinding) {
+                        ForEach(balancedTimeoutOptions, id: \.self) { minutes in
+                            Text(label(forMinutes: minutes)).tag(minutes)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
             Section("Startup") {
                 // Two-argument onChange closure is macOS 14+; use perform: form for macOS 13 compat.
                 Toggle("Launch at login", isOn: $launchAtLoginEnabled)
                     .onChange(of: launchAtLoginEnabled, perform: setLaunchAtLogin)
-            }
-
-            Section("Unlock Timeout") {
-                Picker("Default timeout", selection: $defaultUnlockTimeout) {
-                    ForEach(timeoutOptions, id: \.seconds) { opt in
-                        Text(opt.label).tag(opt.seconds)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Text("After authenticating, the app can relaunch without a new prompt for this long.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !appState.protectedApps.isEmpty {
-                Section("Per-App Overrides") {
-                    ForEach(appState.protectedApps) { app in
-                        // BUG-02 FIX: Removed dead defaultTimeout argument — AppTimeoutRow never used it.
-                        AppTimeoutRow(app: app, timeoutOptions: timeoutOptions)
-                            .environmentObject(appState)
-                    }
-                }
             }
         }
         .formStyle(.grouped)
@@ -51,6 +52,40 @@ struct GeneralSettingsTab: View {
             if #available(macOS 13.0, *) {
                 launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
             }
+        }
+    }
+
+    // MARK: - Bindings
+    //
+    // The picker's setter is synchronous, but our state mutations are async (they write
+    // through the Keychain before flipping the @Published value). We dispatch into a
+    // Task so the Binding's set closure stays sync-compatible.
+
+    private var modeBinding: Binding<SecurityMode> {
+        Binding(
+            get: { appState.securityMode },
+            set: { newMode in
+                Task { await appState.setSecurityMode(newMode) }
+            }
+        )
+    }
+
+    private var timeoutBinding: Binding<Int> {
+        Binding(
+            get: { appState.balancedModeTimeout },
+            set: { newValue in
+                Task { await appState.setBalancedModeTimeout(newValue) }
+            }
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func label(forMinutes minutes: Int) -> String {
+        switch minutes {
+        case 1:  return "1 minute"
+        case 60: return "1 hour"
+        default: return "\(minutes) minutes"
         }
     }
 
@@ -64,64 +99,6 @@ struct GeneralSettingsTab: View {
                 }
             } catch {
                 print("[TouchGate] Launch at login toggle failed: \(error.localizedDescription)")
-            }
-        }
-    }
-}
-
-// MARK: - Per-App Row
-
-struct AppTimeoutRow: View {
-    @EnvironmentObject private var appState: AppState
-    let app: ProtectedApp
-    // BUG-02 FIX: Removed dead `defaultTimeout` property — it was declared but never read in body.
-    let timeoutOptions: [(label: String, seconds: Double)]
-
-    var body: some View {
-        HStack {
-            appIcon
-
-            Text(app.displayName)
-                .lineLimit(1)
-
-            Spacer()
-
-            Picker("", selection: timeoutBinding) {
-                ForEach(timeoutOptions, id: \.seconds) { opt in
-                    Text(opt.label).tag(opt.seconds)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 180)
-
-            Button("Lock Now") {
-                Task { await appState.lockApp(id: app.id) }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(!app.isCurrentlyUnlocked)
-        }
-    }
-
-    private var timeoutBinding: Binding<Double> {
-        Binding(
-            get: { app.unlockTimeout },
-            set: { newValue in
-                Task { await appState.updateTimeout(for: app.id, timeout: newValue) }
-            }
-        )
-    }
-
-    private var appIcon: some View {
-        Group {
-            if let iconData = app.iconData, let nsImage = NSImage(data: iconData) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .frame(width: 20, height: 20)
-            } else {
-                Image(systemName: "app.fill")
-                    .frame(width: 20, height: 20)
-                    .foregroundStyle(.secondary)
             }
         }
     }
